@@ -1,9 +1,10 @@
 import pandas as pd
 import streamlit as st
 import os
+import hashlib
 import numpy as np
 from scipy.linalg import svd
-import bcrypt
+
 
 # Caminhos dos arquivos
 data_dir = 'data'
@@ -33,16 +34,9 @@ forum_df = pd.read_csv(forum_file)
 movies_dict = dict(zip(movies_df['movieId'], movies_df['title']))
 movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(movies_dict.keys())}
 
-# Função para hash de senha utilizando bcrypt
+# Função para hash de senha
 def hash_password(password):
-    # Gera o salt e cria o hash da senha
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(password.encode(), salt)
-    return hashed_password
-
-# Função para verificar se a senha corresponde ao hash armazenado
-def check_password(stored_hash, password):
-    return bcrypt.checkpw(password.encode(), stored_hash)
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # Função para carregar usuários
 def load_users():
@@ -61,11 +55,8 @@ def register_user(username, password):
 # Verificar credenciais
 def check_credentials(username, password):
     users_df = load_users()
-    user_data = users_df[users_df["username"] == username]
-    if not user_data.empty:
-        stored_password_hash = user_data.iloc[0]["password"]
-        return check_password(stored_password_hash.encode(), password)  # Verifica a senha
-    return False
+    hashed_password = hash_password(password)
+    return any((users_df["username"] == username) & (users_df["password"] == hashed_password))
 
 # Função para carregar avaliações
 def load_user_ratings():
@@ -91,7 +82,6 @@ st.title("FilmForge")
 # Variável para controlar o login
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-    st.session_state['username'] = None  # ← Adicione esta linha
 
 if not st.session_state['logged_in']:
     st.sidebar.title("Login")
@@ -117,24 +107,16 @@ if not st.session_state['logged_in']:
     st.stop()  # Impede que o conteúdo após a tela de login seja carregado até o login ser feito.
 
 # Quando o usuário estiver logado, continuar com a navegação
-if st.session_state['logged_in']:
-    # Verificação crítica: garante que 'username' existe
-    if 'username' not in st.session_state or st.session_state['username'] is None:
-        st.error("Erro de autenticação. Por favor, faça login novamente.")
-        st.session_state['logged_in'] = False
-        st.experimental_rerun()  # Força o recarregamento da página
-    
-    username = st.session_state['username']
-    st.sidebar.success(f"Bem-vindo, {username}!")
-    
+username = st.session_state['username']
+st.sidebar.success(f"Bem-vindo, {username}!")
+
 # Navegação
 st.sidebar.title("Navegação")
 page = st.sidebar.radio("Escolha uma opção", ["Recomendações", "Avaliar Filmes", "Histórico", "Fórum"])
 
 # Criar matriz de avaliações
-n_users = 1  # Assume pelo menos o usuário atual
 n_movies = len(movie_id_to_index)
-R = np.full((n_users, n_movies), np.nan) if n_movies > 0 else np.array([])
+R = np.full((1, n_movies), np.nan)
 for _, row in ratings_df.iterrows():
     if row['movieId'] in movie_id_to_index:
         movie_index = movie_id_to_index[row['movieId']]
@@ -143,9 +125,6 @@ for _, row in ratings_df.iterrows():
 # Preencher valores faltantes
 movie_means = np.nanmean(R, axis=0)
 R_filled = np.where(np.isnan(R), movie_means, R)
-if R.size == 0:
-    st.error("Nenhum dado de avaliação encontrado. Faça algumas avaliações primeiro.")
-    st.stop() 
 
 # Verificar e tratar NaNs ou Infs na matriz R_filled
 if np.any(np.isnan(R_filled)) or np.any(np.isinf(R_filled)):
