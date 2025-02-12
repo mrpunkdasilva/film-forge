@@ -3,7 +3,7 @@ import streamlit as st
 import os
 import numpy as np
 from scipy.linalg import svd
-
+import bcrypt
 
 # Caminhos dos arquivos
 data_dir = 'data'
@@ -33,9 +33,16 @@ forum_df = pd.read_csv(forum_file)
 movies_dict = dict(zip(movies_df['movieId'], movies_df['title']))
 movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(movies_dict.keys())}
 
-# Função para hash de senha
+# Função para hash de senha utilizando bcrypt
 def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    # Gera o salt e cria o hash da senha
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password.encode(), salt)
+    return hashed_password
+
+# Função para verificar se a senha corresponde ao hash armazenado
+def check_password(stored_hash, password):
+    return bcrypt.checkpw(password.encode(), stored_hash)
 
 # Função para carregar usuários
 def load_users():
@@ -54,8 +61,11 @@ def register_user(username, password):
 # Verificar credenciais
 def check_credentials(username, password):
     users_df = load_users()
-    hashed_password = hash_password(password)
-    return any((users_df["username"] == username) & (users_df["password"] == hashed_password))
+    user_data = users_df[users_df["username"] == username]
+    if not user_data.empty:
+        stored_password_hash = user_data.iloc[0]["password"]
+        return check_password(stored_password_hash.encode(), password)  # Verifica a senha
+    return False
 
 # Função para carregar avaliações
 def load_user_ratings():
