@@ -1,87 +1,157 @@
-import numpy as np
 import pandas as pd
-from scipy.linalg import svd
 import streamlit as st
+import os
+import hashlib
+import numpy as np
+from scipy.linalg import svd
 
-# Carregar dados dos arquivos CSV
-movies_df = pd.read_csv('data/movies.csv')  # Arquivo com informações dos filmes
-ratings_df = pd.read_csv('data/ratings.csv')  # Arquivo com avaliações dos usuários
 
-# Criar dicionários para mapear IDs para nomes
+# Caminhos dos arquivos
+data_dir = 'data'
+users_file = os.path.join(data_dir, 'users.csv')
+ratings_file = os.path.join(data_dir, 'user_ratings.csv')
+movies_file = os.path.join(data_dir, 'movies.csv')
+
+# Criar diretório de dados se não existir
+os.makedirs(data_dir, exist_ok=True)
+
+# Criar arquivos vazios se não existirem
+if not os.path.exists(users_file):
+    pd.DataFrame(columns=["username", "password"]).to_csv(users_file, index=False)
+if not os.path.exists(ratings_file):
+    pd.DataFrame(columns=["username", "movieId", "rating"]).to_csv(ratings_file, index=False)
+
+# Carregar dados
+movies_df = pd.read_csv(movies_file)
+ratings_df = pd.read_csv(ratings_file)
+
+# Criar dicionário de filmes
 movies_dict = dict(zip(movies_df['movieId'], movies_df['title']))
-users = ratings_df['userId'].unique()
-users_dict = {user_id: f"Usuário {user_id}" for user_id in users}
-
-# Criar um mapeamento de movieId para um índice sequencial
 movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(movies_dict.keys())}
 
-# Criar matriz de avaliações
-n_users = len(users)
-n_movies = len(movie_id_to_index)  # Corrigido para refletir apenas os filmes presentes nas avaliações
-R = np.full((n_users, n_movies), np.nan)  # Matriz esparsa inicializada com NaN
+# Função para hash de senha
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-# Preencher a matriz R com as avaliações
-for _, row in ratings_df.iterrows():
-    user_index = int(row['userId']) - 1  # IDs dos usuários começam em 1, ajustamos para índice 0
-    movie_id = int(row['movieId'])
+# Função para carregar usuários
+def load_users():
+    return pd.read_csv(users_file)
 
-    if movie_id in movie_id_to_index:
-        movie_index = movie_id_to_index[movie_id]
+# Registrar usuário
+def register_user(username, password):
+    users_df = load_users()
+    if username in users_df["username"].values:
+        return False
+    hashed_password = hash_password(password)
+    new_user = pd.DataFrame([[username, hashed_password]], columns=["username", "password"])
+    new_user.to_csv(users_file, mode='a', header=False, index=False)
+    return True
 
-        # Verifica se os índices estão dentro dos limites da matriz
-        if 0 <= user_index < n_users and 0 <= movie_index < n_movies:
-            R[user_index, movie_index] = row['rating']
+# Verificar credenciais
+def check_credentials(username, password):
+    users_df = load_users()
+    hashed_password = hash_password(password)
+    return any((users_df["username"] == username) & (users_df["password"] == hashed_password))
+
+# Função para carregar avaliações
+def load_user_ratings():
+    return pd.read_csv(ratings_file)
+
+# Salvar avaliação
+def save_user_rating(username, movie_id, rating):
+    user_ratings_df = load_user_ratings()
+    new_rating = pd.DataFrame([[username, movie_id, rating]], columns=["username", "movieId", "rating"])
+    user_ratings_df = pd.concat([user_ratings_df, new_rating], ignore_index=True)
+    user_ratings_df.to_csv(ratings_file, index=False)
+
+# Interface de Login
+st.title("FilmForge")
+
+# Variável para controlar o login
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+if not st.session_state['logged_in']:
+    st.sidebar.title("Login")
+    username = st.sidebar.text_input("Usuário")
+    password = st.sidebar.text_input("Senha", type="password")
+
+    # Tentar logar
+    if st.sidebar.button("Entrar"):
+        if check_credentials(username, password):
+            st.session_state['logged_in'] = True
+            st.session_state['username'] = username
+            st.sidebar.success(f"Bem-vindo, {username}!")
         else:
-            print(f"Índices fora do limite -> user_index: {user_index}, movie_index: {movie_index}")
+            st.sidebar.error("Usuário ou senha incorretos")
 
-# Preencher valores faltantes com a média das avaliações de cada filme
+    # Registrar novo usuário
+    if st.sidebar.button("Registrar"):
+        if register_user(username, password):
+            st.sidebar.success("Usuário registrado com sucesso!")
+        else:
+            st.sidebar.error("Usuário já existe!")
+
+    st.stop()  # Impede que o conteúdo após a tela de login seja carregado até o login ser feito.
+
+# Quando o usuário estiver logado, continuar com a navegação
+username = st.session_state['username']
+st.sidebar.success(f"Bem-vindo, {username}!")
+
+# Navegação
+st.sidebar.title("Navegação")
+page = st.sidebar.radio("Escolha uma opção", ["Recomendações", "Avaliar Filmes", "Histórico"])
+
+# Criar matriz de avaliações
+n_movies = len(movie_id_to_index)
+R = np.full((1, n_movies), np.nan)
+for _, row in ratings_df.iterrows():
+    if row['movieId'] in movie_id_to_index:
+        movie_index = movie_id_to_index[row['movieId']]
+        R[0, movie_index] = row['rating']
+
+# Preencher valores faltantes
 movie_means = np.nanmean(R, axis=0)
-movie_means = np.where(np.isnan(movie_means), 0, movie_means)  # Substituir NaN por 0
 R_filled = np.where(np.isnan(R), movie_means, R)
 
-# Garantir que não há mais NaN ou Inf
-R_filled = np.nan_to_num(R_filled, nan=0.0, posinf=0.0, neginf=0.0)
+# Verificar e tratar NaNs ou Infs na matriz R_filled
+if np.any(np.isnan(R_filled)) or np.any(np.isinf(R_filled)):
+    # Substituindo NaNs e Infs por zeros ou pela média (como preferir)
+    R_filled = np.nan_to_num(R_filled, nan=0.0, posinf=0.0, neginf=0.0)
 
-# Verificar se a matriz está limpa antes de aplicar o SVD
-if np.isnan(R_filled).any() or np.isinf(R_filled).any():
-    print("Erro: Ainda há NaNs ou Infs na matriz!")
-    print("Número de NaNs:", np.isnan(R_filled).sum())
-    print("Número de Infs:", np.isinf(R_filled).sum())
-else:
-    # Aplicar SVD
-    U, sigma, Vt = svd(R_filled, full_matrices=False)
-    sigma = np.diag(sigma)
+# Aplicar SVD
+U, sigma, Vt = svd(R_filled, full_matrices=False)
+sigma = np.diag(sigma)
+R_predicted = np.dot(np.dot(U, sigma), Vt)
 
-    # Reconstruir a matriz de previsões
-    R_predicted = np.dot(np.dot(U, sigma), Vt)
+# Função de recomendação
+def recommend_movies(R_predicted, movies_dict, movie_id_to_index, n_recommendations=5):
+    user_ratings = R_predicted[0]
+    top_movie_indices = np.argsort(user_ratings)[::-1][:n_recommendations]
+    index_to_movie_id = {idx: movie_id for movie_id, idx in movie_id_to_index.items()}
+    return [(index_to_movie_id[movie_idx], movies_dict[index_to_movie_id[movie_idx]]) for movie_idx in top_movie_indices if movie_idx in index_to_movie_id]
 
-    # Função de recomendação
-    def recommend_movies(user_id, R_predicted, movies_dict, movie_id_to_index, n_recommendations=5):
-        user_index = user_id - 1  # Ajuste para índice baseado em zero
-        if user_index >= R_predicted.shape[0]:  # Verifica se o usuário existe
-            print(f"Erro: usuário {user_id} não encontrado na matriz.")
-            return []
-
-        user_ratings = R_predicted[user_index]
-        top_movie_indices = np.argsort(user_ratings)[::-1][:n_recommendations]
-
-        # Reverter o índice para movieId original
-        index_to_movie_id = {idx: movie_id for movie_id, idx in movie_id_to_index.items()}
-        recommended_movies = [(index_to_movie_id[movie_idx], movies_dict[index_to_movie_id[movie_idx]])
-                              for movie_idx in top_movie_indices if movie_idx in index_to_movie_id]
-
-        return recommended_movies
-
-    # Dashboard com Streamlit
-    st.title("FilmForge")
-
-    # Selecionar usuário
-    user_id = st.selectbox("Selecione o usuário", list(users_dict.keys()), format_func=lambda x: users_dict[x])
-
-    # Gerar recomendações
-    recommended_movies = recommend_movies(user_id, R_predicted, movies_dict, movie_id_to_index)
-
-    # Exibir recomendações
-    st.write(f"Recomendações para {users_dict[user_id]}:")
+# Interface principal
+if page == "Recomendações":
+    st.subheader(f"Recomendações para {username}")
+    recommended_movies = recommend_movies(R_predicted, movies_dict, movie_id_to_index)
     for movie_id, movie_name in recommended_movies:
-        st.write(f"Filme: {movie_name} (ID: {movie_id})")
+        st.write(f"🎬 {movie_name} (ID: {movie_id})")
+
+elif page == "Avaliar Filmes":
+    st.subheader("Avalie um Filme")
+    selected_movie = st.selectbox("Escolha um filme", list(movies_dict.keys()), format_func=lambda x: movies_dict[x])
+    rating = st.slider("Nota (0.5 a 5.0)", 0.5, 5.0, step=0.5)
+
+    if st.button("Salvar Avaliação"):
+        save_user_rating(username, selected_movie, rating)
+        st.success("Avaliação salva com sucesso!")
+
+elif page == "Histórico":
+    st.subheader("Suas Avaliações")
+    user_ratings_df = load_user_ratings()
+    user_history = user_ratings_df[user_ratings_df["username"] == username]
+    if user_history.empty:
+        st.info("Você ainda não avaliou nenhum filme.")
+    else:
+        st.table(user_history)
