@@ -91,6 +91,7 @@ st.title("FilmForge")
 # Variável para controlar o login
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
+    st.session_state['username'] = None  # ← Adicione esta linha
 
 if not st.session_state['logged_in']:
     st.sidebar.title("Login")
@@ -117,22 +118,23 @@ if not st.session_state['logged_in']:
 
 # Quando o usuário estiver logado, continuar com a navegação
 if st.session_state['logged_in']:
-    # Verificar se 'username' está presente no session_state
-    if 'username' not in st.session_state:
+    # Verificação crítica: garante que 'username' existe
+    if 'username' not in st.session_state or st.session_state['username'] is None:
         st.error("Erro de autenticação. Por favor, faça login novamente.")
         st.session_state['logged_in'] = False
-        st.experimental_rerun()
+        st.experimental_rerun()  # Força o recarregamento da página
     
     username = st.session_state['username']
     st.sidebar.success(f"Bem-vindo, {username}!")
-
+    
 # Navegação
 st.sidebar.title("Navegação")
 page = st.sidebar.radio("Escolha uma opção", ["Recomendações", "Avaliar Filmes", "Histórico", "Fórum"])
 
 # Criar matriz de avaliações
+n_users = 1  # Assume pelo menos o usuário atual
 n_movies = len(movie_id_to_index)
-R = np.full((1, n_movies), np.nan)
+R = np.full((n_users, n_movies), np.nan) if n_movies > 0 else np.array([])
 for _, row in ratings_df.iterrows():
     if row['movieId'] in movie_id_to_index:
         movie_index = movie_id_to_index[row['movieId']]
@@ -141,6 +143,9 @@ for _, row in ratings_df.iterrows():
 # Preencher valores faltantes
 movie_means = np.nanmean(R, axis=0)
 R_filled = np.where(np.isnan(R), movie_means, R)
+if R.size == 0:
+    st.error("Nenhum dado de avaliação encontrado. Faça algumas avaliações primeiro.")
+    st.stop() 
 
 # Verificar e tratar NaNs ou Infs na matriz R_filled
 if np.any(np.isnan(R_filled)) or np.any(np.isinf(R_filled)):
