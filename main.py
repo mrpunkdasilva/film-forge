@@ -11,6 +11,7 @@ data_dir = 'data'
 users_file = os.path.join(data_dir, 'users.csv')
 ratings_file = os.path.join(data_dir, 'user_ratings.csv')
 movies_file = os.path.join(data_dir, 'movies.csv')
+forum_file = os.path.join(data_dir, 'forum_messages.csv')
 
 # Criar diretório de dados se não existir
 os.makedirs(data_dir, exist_ok=True)
@@ -20,10 +21,14 @@ if not os.path.exists(users_file):
     pd.DataFrame(columns=["username", "password"]).to_csv(users_file, index=False)
 if not os.path.exists(ratings_file):
     pd.DataFrame(columns=["username", "movieId", "rating"]).to_csv(ratings_file, index=False)
+if not os.path.exists(forum_file):
+    pd.DataFrame(columns=["username", "message"]).to_csv(forum_file, index=False)
+
 
 # Carregar dados
 movies_df = pd.read_csv(movies_file)
 ratings_df = pd.read_csv(ratings_file)
+forum_df = pd.read_csv(forum_file)
 
 # Criar dicionário de filmes
 movies_dict = dict(zip(movies_df['movieId'], movies_df['title']))
@@ -64,6 +69,13 @@ def save_user_rating(username, movie_id, rating):
     user_ratings_df = pd.concat([user_ratings_df, new_rating], ignore_index=True)
     user_ratings_df.to_csv(ratings_file, index=False)
 
+# Salvar mensagem no fórum
+def save_forum_message(username, message):
+    forum_df = pd.read_csv(forum_file)
+    new_message = pd.DataFrame([[username, message]], columns=["username", "message"])
+    forum_df = pd.concat([forum_df, new_message], ignore_index=True)
+    forum_df.to_csv(forum_file, index=False)
+
 # Interface de Login
 st.title("FilmForge")
 
@@ -100,7 +112,7 @@ st.sidebar.success(f"Bem-vindo, {username}!")
 
 # Navegação
 st.sidebar.title("Navegação")
-page = st.sidebar.radio("Escolha uma opção", ["Recomendações", "Avaliar Filmes", "Histórico"])
+page = st.sidebar.radio("Escolha uma opção", ["Recomendações", "Avaliar Filmes", "Histórico", "Fórum"])
 
 # Criar matriz de avaliações
 n_movies = len(movie_id_to_index)
@@ -155,3 +167,23 @@ elif page == "Histórico":
         st.info("Você ainda não avaliou nenhum filme.")
     else:
         st.table(user_history)
+
+elif page == "Fórum":
+    st.subheader("Fórum")
+    st.write("Aqui você pode ver as mensagens de outros usuários e postar a sua.")
+
+    # Exibir mensagens do fórum
+    if forum_df.empty:
+        st.info("Ainda não há mensagens no fórum.")
+    else:
+        for idx, row in forum_df.iterrows():
+            st.write(f"**{row['username']}**: {row['message']}")
+
+    # Enviar nova mensagem
+    new_message = st.text_area("Poste uma nova mensagem:")
+    if st.button("Postar"):
+        if new_message:
+            save_forum_message(username, new_message)
+            st.success("Mensagem postada com sucesso!")
+        else:
+            st.warning("Digite uma mensagem antes de postar.")
