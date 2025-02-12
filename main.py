@@ -116,8 +116,15 @@ if not st.session_state['logged_in']:
     st.stop()  # Impede que o conteúdo após a tela de login seja carregado até o login ser feito.
 
 # Quando o usuário estiver logado, continuar com a navegação
-username = st.session_state['username']
-st.sidebar.success(f"Bem-vindo, {username}!")
+if st.session_state['logged_in']:
+    # Verificar se 'username' está presente no session_state
+    if 'username' not in st.session_state:
+        st.error("Erro de autenticação. Por favor, faça login novamente.")
+        st.session_state['logged_in'] = False
+        st.experimental_rerun()
+    
+    username = st.session_state['username']
+    st.sidebar.success(f"Bem-vindo, {username}!")
 
 # Navegação
 st.sidebar.title("Navegação")
