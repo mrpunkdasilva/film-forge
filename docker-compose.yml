@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  film-forge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: film-forge
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+      - STREAMLIT_THEME_PRIMARY_COLOR=#FF4B4B
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
